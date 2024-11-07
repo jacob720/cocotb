@@ -290,6 +290,7 @@ class Runner(ABC):
         testcase: Optional[Union[str, Sequence[str]]] = None,
         seed: Optional[Union[str, int]] = None,
         test_args: Sequence[str] = [],
+        elab_args: Sequence[str] = [],
         plusargs: Sequence[str] = [],
         extra_env: Mapping[str, str] = {},
         waves: bool = False,
@@ -378,6 +379,7 @@ class Runner(ABC):
         self.pre_cmd = pre_cmd
 
         self.test_args = list(test_args)
+        self.elab_args = list(elab_args)
         self.plusargs = list(plusargs)
         self.env = dict(extra_env)
 
@@ -992,6 +994,57 @@ class Ghdl(Runner):
         return cmds
 
 
+class GhdlGCC(Ghdl):
+    """Implementation of :class:`Ghdl` for Ghdl with coverage.
+
+    * Does not support the ``pre_cmd`` argument to :meth:`.test`.
+    * Does not support the ``gui`` argument to :meth:`.test`.
+    * Does not support the ``waves`` argument to :meth:`.build` or :meth:`.test`.
+    """
+
+    def _build_command(self) -> List[_Command]:
+        if self.verilog_sources:
+            raise ValueError(
+                f"{type(self).__qualname__}: Simulator does not support Verilog"
+            )
+
+        cmds = [
+            ["ghdl", "-a"]
+            + [f"--work={self.hdl_library}"]
+            + [arg for arg in self.build_args if type(arg) in (str, VHDL)]
+            + [str(source) for source in self.sources if is_vhdl_source(source)]
+            + [str(source_file) for source_file in self.vhdl_sources]
+        ]
+
+        return cmds
+
+    def _test_command(self) -> List[_Command]:
+        print(self.elab_args)
+        if self.hdl_toplevel is not None:
+            cmds = [
+                ["ghdl", "-e"]
+                + [f"--work={self.hdl_toplevel_library}"]
+                + self.test_args
+                + self.elab_args
+                + [self.sim_hdl_toplevel]
+            ]
+
+            cmds += [
+                ["ghdl", "-r"]
+                + [f"--work={self.hdl_toplevel_library}"]
+                + self.test_args
+                + [self.sim_hdl_toplevel]
+                + [
+                    "--vpi="
+                    + cocotb_tools.config.lib_name_path("vpi", "ghdl").as_posix()
+                ]
+                + self.plusargs
+                + self._get_parameter_options(self.parameters)
+            ]
+
+        return cmds
+
+
 class Nvc(Runner):
     """Implementation of :class:`Runner` for NVC.
 
@@ -1498,6 +1551,7 @@ def get_runner(simulator_name: str) -> Runner:
         "icarus": Icarus,
         "questa": Questa,
         "ghdl": Ghdl,
+        "ghdlgcc": GhdlGCC,
         "riviera": Riviera,
         "verilator": Verilator,
         "xcelium": Xcelium,
